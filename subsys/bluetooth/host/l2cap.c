@@ -1575,6 +1575,7 @@ static void le_conn_rsp(struct bt_l2cap *l2cap, uint8_t ident,
 	struct bt_l2cap_le_chan *chan;
 	struct bt_l2cap_le_conn_rsp *rsp = (void *)buf->data;
 	uint16_t dcid, mtu, mps, credits, result;
+	int result_to_propagate 
 
 	if (buf->len < sizeof(*rsp)) {
 		BT_ERR("Too small LE conn rsp packet size");
@@ -1604,6 +1605,11 @@ static void le_conn_rsp(struct bt_l2cap *l2cap, uint8_t ident,
 		return;
 	}
 
+	if (result == BT_L2CAP_LE_ERR_AUTHENTICATION)
+	{
+		result_to_s  = (int)result;
+		chan->chan.ops->status(&chan->chan, &result_to_s);
+	}
 	/* Cancel RTX work */
 	k_work_cancel_delayable(&chan->chan.rtx_work);
 
