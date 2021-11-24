@@ -25,7 +25,6 @@ import glob
 import concurrent
 import xml.etree.ElementTree as ET
 import logging
-import pty
 from pathlib import Path
 from distutils.spawn import find_executable
 from colorama import Fore
@@ -57,6 +56,14 @@ try:
     import psutil
 except ImportError:
     print("Install psutil python module with pip to run in Qemu.")
+
+try:
+    import pty
+except ImportError as capture_error:
+    if os.name == "nt":  # "nt" means that program is running on Windows OS
+        pass  # "--device-serial-pty" option is not supported on Windows OS
+    else:
+        raise capture_error
 
 ZEPHYR_BASE = os.getenv("ZEPHYR_BASE")
 if not ZEPHYR_BASE:
@@ -733,7 +740,7 @@ class DeviceHandler(Handler):
         else:
             serial_device = hardware.serial
 
-        logger.debug("Using serial device {}".format(serial_device))
+        logger.debug("Using serial device {} @ {} baud".format(serial_device, hardware.serial_baud))
 
         if (self.suite.west_flash is not None) or runner:
             command = ["west", "flash", "--skip-rebuild", "-d", self.build_dir]
@@ -790,7 +797,7 @@ class DeviceHandler(Handler):
         try:
             ser = serial.Serial(
                 serial_device,
-                baudrate=115200,
+                baudrate=hardware.serial_baud,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
                 bytesize=serial.EIGHTBITS,
@@ -2686,7 +2693,7 @@ class TestSuite(DisablePyTestCollectionMixin):
             logger.info("Cannot read zephyr version.")
 
     def get_platform_instances(self, platform):
-        filtered_dict = {k:v for k,v in self.instances.items() if k.startswith(platform + "/")}
+        filtered_dict = {k:v for k,v in self.instances.items() if k.startswith(platform + os.sep)}
         return filtered_dict
 
     def config(self):
@@ -3933,10 +3940,12 @@ class Gcovr(CoverageTool):
                                ["-o", os.path.join(subdir, "index.html")],
                                stdout=coveragelog)
 
+
 class DUT(object):
     def __init__(self,
                  id=None,
                  serial=None,
+                 serial_baud=None,
                  platform=None,
                  product=None,
                  serial_pty=None,
@@ -3947,6 +3956,9 @@ class DUT(object):
                  runner=None):
 
         self.serial = serial
+        self.serial_baud = 115200
+        if serial_baud:
+            self.serial_baud = serial_baud
         self.platform = platform
         self.serial_pty = serial_pty
         self._counter = Value("i", 0)
@@ -4038,8 +4050,8 @@ class HardwareMap:
         self.detected = []
         self.duts = []
 
-    def add_device(self, serial, platform, pre_script, is_pty):
-        device = DUT(platform=platform, connected=True, pre_script=pre_script)
+    def add_device(self, serial, platform, pre_script, is_pty, baud=None):
+        device = DUT(platform=platform, connected=True, pre_script=pre_script, serial_baud=baud)
 
         if is_pty:
             device.serial_pty = serial
@@ -4059,6 +4071,7 @@ class HardwareMap:
             id = dut.get('id')
             runner = dut.get('runner')
             serial = dut.get('serial')
+            baud = dut.get('baud', None)
             product = dut.get('product')
             fixtures = dut.get('fixtures', [])
             new_dut = DUT(platform=platform,
@@ -4066,6 +4079,7 @@ class HardwareMap:
                           runner=runner,
                           id=id,
                           serial=serial,
+                          serial_baud=baud,
                           connected=serial is not None,
                           pre_script=pre_script,
                           post_script=post_script,
